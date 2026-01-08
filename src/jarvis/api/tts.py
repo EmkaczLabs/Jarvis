@@ -2,8 +2,8 @@ import io
 
 import soundfile as sf
 
-from glados.TTS import tts_glados
-from glados.utils import spoken_text_converter
+from jarvis.TTS import tts_glados
+from jarvis.utils import spoken_text_converter
 
 
 def write_jarvis_audio_file(f: str | io.BytesIO, text: str, *, format: str) -> None:
@@ -16,7 +16,7 @@ def write_jarvis_audio_file(f: str | io.BytesIO, text: str, *, format: str) -> N
     """
     jarvis_tts = tts_glados.SpeechSynthesizer()
     converter = spoken_text_converter.SpokenTextConverter()
-    converted_text = converter.text_to_spoken(text)
+    converted_text = converter.convert_to_spoken_text(text)
     audio = jarvis_tts.generate_speech_audio(converted_text)
     sf.write(
         f,

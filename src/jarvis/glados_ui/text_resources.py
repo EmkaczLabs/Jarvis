@@ -51,10 +51,6 @@ help_text = (
     "\n\nPress 't' to open a typing prompt where you can type a message instead of speaking."
 )
 
-
-# Why yes, since you ask, someone *did* bother to transcrbe this:
-# https://www.reddit.com/r/Portal/comments/5n3bn2/portal_computer_screens_mystery_text/
-
 recipe = """IUIU IVLILIIIIIIIIU IIU
 w3amG=T!SM.V9HZ89tj-@{n}Z?:aloMdw
 lD0e'4u?l$!uflleNn0N.1 (18.25-ounce) Zpackage chocyolate cake mixul&w,#VnLO@p
@@ -116,13 +112,4 @@ n-"&NN.U<7l‘Rish-shaped candies|'_y-yweo&w6bY- kQ8jlZ) Fm
 0YQvRNfish-shapBJed ethyl benzene0ot 9%FWZsvFGEE
 r&#S.=+.uyk4%H
 3bnA{KH%PF
-".N26
-{)kTTus,tt}=bpullBK anyd xpeel licorice.pEF8YTT(&3f @z{
-:d6EN@|;:
-8" =@{S*fish-shaped volatikle organSic coPmpounds<FNZo
-P6755KHq SM
-kUlc:>m>LpQo<gX0lBl7!=WQoi_4E)*8-hk
-c-liltsediment-shaped sedimentQ.(Zo8a(Mg)?J{Hlk
-YNHCrzYROnH|OB&8-sL
-P Wg=jGz3bWYl-gU%Cv'6S<|4evyD?JN.|
-7Tlv=A 200-lfnnl thick xlmnermeahle S”/,.9c|av |aver.lSm i"1ll v=CPvl MGBnP7t<.<W8."""
+"""

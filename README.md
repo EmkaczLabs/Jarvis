@@ -54,7 +54,7 @@ You can also run the CLI via `python -m jarvis.cli` if you don't install the pac
 - The `interruptible` setting in the config still applies: if `interruptible: false` and Jarvis is speaking, new typed input will be ignored until speaking finishes.
 
 ## Configuration (canonical keys)
-Configuration is read into the `JarvisConfig` model (see `src/glados/core/engine.py`). `configs/jarvis_config.yaml` contains an example configuration. Important fields include:
+Configuration is read into the `JarvisConfig` model (see `src/jarvis/core/engine.py`). `configs/jarvis_config.yaml` contains an example configuration. Important fields include:
 
 - `llm_model` — identifier/name of the LLM to use
 - `completion_url` — URL for the LLM completion/streaming endpoint
@@ -65,17 +65,16 @@ Configuration is read into the `JarvisConfig` model (see `src/glados/core/engine
 - `wake_word` — optional wake word string (typing bypasses this)
 - `voice` — TTS voice identifier
 - `announcement` — optional startup announcement
-
-The full example config (in `configs/jarvis_config.yaml`) also contains a `personality_preprompt` list used to seed the assistant's conversation history.
+- The full example config (in `configs/jarvis_config.yaml`) also contains a `personality_preprompt` list used to seed the assistant's conversation history.
 
 ## Components & architecture (high level)
-- `Jarvis` (src/glados/core/engine.py): orchestrator that wires ASR, TTS, LLM, audio I/O, queues and threads.
-- `SpeechListener` (src/glados/core/speech_listener.py): captures audio, runs VAD, buffers samples, and triggers ASR when speech ends.
-- `LanguageModelProcessor` (src/glados/core/llm_processor.py): sends user text (from queue) to the LLM, streams responses, splits into sentences and dispatches them to the TTS queue.
+- `Jarvis` (src/jarvis/core/engine.py): orchestrator that wires ASR, TTS, LLM, audio I/O, queues and threads.
+- `SpeechListener` (src/jarvis/core/speech_listener.py): captures audio, runs VAD, buffers samples, and triggers ASR when speech ends.
+- `LanguageModelProcessor` (src/jarvis/core/llm_processor.py): sends user text (from queue) to the LLM, streams responses, splits into sentences and dispatches them to the TTS queue.
   - The processor handles both OpenAI-style streaming ``data: `` format and plain JSON streaming (e.g., Ollama-like responses).
-- `TextToSpeechSynthesizer` (src/glados/core/tts_synthesizer.py): converts sentences into audio and places `AudioMessage` objects onto the audio queue.
-- `SpeechPlayer` (src/glados/core/speech_player.py): plays audio messages, manages interruption behavior and appends assistant messages to conversation history when an end-of-stream token is received.
-- `Audio I/O` implementations (src/glados/audio_io/): e.g., `sounddevice` backend (`sounddevice_io.py`) using `sounddevice` and a VAD model to provide sample chunks and VAD confidence.
+- `TextToSpeechSynthesizer` (src/jarvis/core/tts_synthesizer.py): converts sentences into audio and places `AudioMessage` objects onto the audio queue.
+- `SpeechPlayer` (src/jarvis/core/speech_player.py): plays audio messages, manages interruption behavior and appends assistant messages to conversation history when an end-of-stream token is received.
+- `Audio I/O` implementations (src/jarvis/audio_io/): e.g., `sounddevice` backend (`sounddevice_io.py`) using `sounddevice` and a VAD model to provide sample chunks and VAD confidence.
 
 Inter-thread communication uses Python `queue.Queue` instances and threading `Event` objects such as `processing_active_event`, `currently_speaking_event`, and `shutdown_event`.
 
@@ -83,7 +82,7 @@ Inter-thread communication uses Python `queue.Queue` instances and threading `Ev
 Model files are stored under `models/ASR` and `models/TTS`. The download command in `src/jarvis/cli.py` lists the models it expects and verifies checksums.
 
 ## HTTP TTS API
-An API route exists in `src/glados/api/app.py`:
+An API route exists in `src/jarvis/api/app.py`:
 
 - POST `/v1/audio/speech` — accepts JSON `{ input, model, voice, response_format, speed }` and returns a file-like stream of generated audio.
 - A helper script `scripts/serve` starts a local server running that API (uses `litestar` under the hood).

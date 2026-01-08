@@ -7,7 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 import sounddevice as sd  # type: ignore
 
-from . import VAD
+from .vad import VAD
 
 
 class SoundDeviceAudioIO:

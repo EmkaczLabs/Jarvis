@@ -1,9 +1,5 @@
-"""Compatibility wrapper for the original `glados.glados_ui` package."""
+"""Jarvis UI static resources (text and styles)."""
 
-from glados.glados_ui import *  # re-export everything
+from .text_resources import aperture, help_text, login_text, recipe
 
-try:
-    import glados.glados_ui as _src
-    __all__ = getattr(_src, "__all__", [])
-except Exception:
-    __all__ = []
+__all__ = ["aperture", "help_text", "login_text", "recipe"]

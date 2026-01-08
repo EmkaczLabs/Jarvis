@@ -7,7 +7,7 @@ import onnxruntime as ort  # type: ignore
 import soundfile as sf  # type: ignore
 import yaml
 
-from ..utils.resources import resource_path
+from jarvis.utils.resources import resource_path
 from .mel_spectrogram import MelSpectrogramCalculator, MelSpectrogramConfig
 
 # Default OnnxRuntime is way to verbose, only show fatal errors
