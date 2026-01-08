@@ -457,23 +457,73 @@ class SpokenTextConverter:
         except Exception:
             return num.group()
 
+    def _number_to_ordinal(self, n: int) -> str:
+        """Convert an integer to its ordinal spoken-word equivalent (e.g., 1 -> first, 18 -> eighteenth)."""
+        ordinals_small = {
+            0: "zeroth",
+            1: "first",
+            2: "second",
+            3: "third",
+            4: "fourth",
+            5: "fifth",
+            6: "sixth",
+            7: "seventh",
+            8: "eighth",
+            9: "ninth",
+            10: "tenth",
+            11: "eleventh",
+            12: "twelfth",
+            13: "thirteenth",
+            14: "fourteenth",
+            15: "fifteenth",
+            16: "sixteenth",
+            17: "seventeenth",
+            18: "eighteenth",
+            19: "nineteenth",
+            20: "twentieth",
+        }
+        if n in ordinals_small:
+            return ordinals_small[n]
+
+        # Handle teen exceptions (11-13) which always use 'th'
+        if 10 < (n % 100) < 14:
+            return f"{self._number_to_words(n)}th"
+
+        words = self._number_to_words(n)
+        # Determine the last word (handles hyphens)
+        if "-" in words:
+            base, last = words.rsplit("-", 1)
+            sep = "-"
+        elif " " in words:
+            base, last = words.rsplit(" ", 1)
+            sep = " "
+        else:
+            base, last = "", words
+            sep = ""
+
+        unit_map = {
+            "one": "first",
+            "two": "second",
+            "three": "third",
+            "five": "fifth",
+            "eight": "eighth",
+            "nine": "ninth",
+            "twelve": "twelfth",
+        }
+
+        if last in unit_map:
+            new_last = unit_map[last]
+        else:
+            new_last = last + "th"
+
+        if base:
+            return f"{base}{sep}{new_last}"
+        return new_last
+
     def convert_to_spoken_text(self, text: str) -> str:
         """
-        Convert the given text to its spoken-word equivalent.
-
-        This method is the main entry point for converting a string of text, including numbers,
-        dates, times, and currency, into a fully spoken-word representation. It uses regex patterns
-        to identify and convert different elements within the text.
-
-        Parameters:
-            text (str): The input text to convert.
-
-        Returns:
-            str: The spoken-word representation of the input text.
-
-        Example:
-            convert_to_spoken_text("The meeting is at 3:00pm on 1/1/2024.")
-            returns "The meeting is at three o'clock on one/one/twenty twenty-four."
+        Convert the given text to its spoken-word equivalent using a regex-based tokenizer
+        that preserves text and converts numbers, ordinals, times, currencies and percentages.
         """
         try:
             # Quick check for empty or whitespace-only text
@@ -483,52 +533,61 @@ class SpokenTextConverter:
             # Normalize newlines and excessive spaces
             text = re.sub(r"\s+", " ", text.replace("\n", " ")).strip()
 
-            # Split text into segments based on the convertible pattern
-            segments = self.convertible_pattern.split(text)
+            # Regex to find interesting numeric/time/currency tokens
+            token_re = re.compile(
+                r"(\$\s*\d{1,3}(?:[,\d]*)(?:\.\d+)?|£\s*\d{1,3}(?:[,\d]*)(?:\.\d+)?|\d{1,2}:\d{2}(?:[ap]m)?|\b\d{4}s?\b|\b\d+(?:\.\d+)?%?\b|\b\d+(?:st|nd|rd|th)\b)",
+                flags=re.IGNORECASE,
+            )
 
-            # Initialize an output list
-            output: list[str] = []
+            def _repl(m: re.Match[str]) -> str:
+                tok = m.group(0)
 
-            # Index for tracking position in the original text
-            text_index = 0
+                # Currency
+                if tok.lstrip().startswith("$") or tok.lstrip().startswith("£"):
+                    try:
+                        return self._flip_money(re.match(r".*", tok))
+                    except Exception:
+                        return tok
 
-            # Process each segment
-            for segment in segments:
-                if segment == "":
-                    continue  # Skip empty segments
+                # Time
+                if ":" in tok:
+                    mm = re.match(r"^\d{1,2}:\d{2}(?:[ap]m)?$", tok, flags=re.IGNORECASE)
+                    if mm:
+                        return self._split_num(mm)
+                    return tok
 
-                # Find the end index of the current segment in the original text
-                end_index = text_index + len(segment)
+                # Year (e.g., 1999 or 1950s)
+                if re.fullmatch(r"\d{4}s?", tok):
+                    mm = re.match(r"^\d{4}s?$", tok)
+                    return self._split_num(mm)
 
-                # Check if the segment matches a known pattern for conversion
-                if self.convertible_pattern.match(segment):
-                    # Determine the type of conversion needed
-                    if re.match(r"^\d+(\.\d+)?$", segment):
-                        # Plain number or decimal
-                        converted = self._number_to_words(segment)
-                    elif re.match(r"^\d{1,2}:\d{2}([ap]m)?$", segment, re.I):
-                        # Time in 12-hour or 24-hour format
-                        converted = self._split_num(re.match(r"^\d{1,2}:\d{2}([ap]m)?$", segment, re.I))
-                    elif re.match(r"^\d{4}$", segment):
-                        # Year in YYYY format
-                        converted = self._split_num(re.match(r"^\d{4}$", segment))
-                    elif re.match(r"^\$?\d+(\.\d{2})?$", segment):
-                        # Currency in $XX.XX or XX.XX format
-                        converted = self._flip_money(re.match(r"^\$?\d+(\.\d{2})?$", segment))
-                    else:
-                        converted = segment  # Fallback to original if no match
+                # Percentage
+                if tok.endswith("%"):
+                    num = tok[:-1]
+                    try:
+                        return f"{self._number_to_words(num)} percent"
+                    except Exception:
+                        return tok
 
-                    output.append(converted)
-                else:
-                    # If no conversion is needed, just add the original segment
-                    output.append(segment)
+                # Ordinal like 18th
+                m_ord = re.match(r"^(\d+)(st|nd|rd|th)$", tok, flags=re.IGNORECASE)
+                if m_ord:
+                    n = int(m_ord.group(1))
+                    try:
+                        return self._number_to_ordinal(n)
+                    except Exception:
+                        return tok
 
-                # Update the text index
-                text_index = end_index
+                # Plain number/decimal
+                if re.fullmatch(r"\d+(?:\.\d+)?", tok):
+                    try:
+                        return self._number_to_words(tok)
+                    except Exception:
+                        return tok
 
-            # Join the output list into a single string
-            # Use a single space when joining segments to preserve spacing
-            result = " ".join(output)
+                return tok
+
+            result = token_re.sub(_repl, text)
 
             # Post-processing: Handle specific cases like "a m" / "p m" to "am" / "pm"
             result = re.sub(r"\b(a m|p m)\b", lambda x: x.group().replace(" ", ""), result)

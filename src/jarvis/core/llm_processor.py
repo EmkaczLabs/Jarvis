@@ -138,6 +138,17 @@ class LanguageModelProcessor:
         # Normalize newlines and punctuation similar to original implementation
         sentence = sentence.replace("\n\n", ". ").replace("\n", ". ").replace("  ", " ").replace(":", " ")
 
+        # Insert a period before common sentence-starters when punctuation is missing
+        # e.g., "... live in Poland Please check..." -> "... live in Poland. Please check..."
+        sentence_starters = r"(?:Please|However|Therefore|Also|Moreover|Additionally|Next|Finally|Meanwhile|But|So|Thus|Hence)"
+        # Use a capture of the preceding character (fixed-width) and a callable replacement
+        sentence = re.sub(
+            rf"([a-z0-9\)\]\x27\x22])\s+(?={sentence_starters}\b)",
+            lambda m: m.group(1) + ". ",
+            sentence,
+            flags=re.IGNORECASE,
+        )
+
         # Collapse whitespace to single spaces and trim
         sentence = re.sub(r"\s+", " ", sentence).strip()
 

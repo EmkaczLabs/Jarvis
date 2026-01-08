@@ -286,3 +286,16 @@ def test_convert_mathematical_notation(converter: SpokenTextConverter, input_tex
     """
     result = converter.text_to_spoken(input_text)
     assert result.lower() == expected.lower()
+
+
+def test_convert_ordinals_and_century(converter: SpokenTextConverter) -> None:
+    input_text = "The castle was built in the 18th century."
+    result = converter.text_to_spoken(input_text)
+    assert "eighteenth century" in result.lower()
+
+
+def test_numbers_in_sentence(converter: SpokenTextConverter) -> None:
+    input_text = "The year is 1999 and the population is 1000000."
+    result = converter.text_to_spoken(input_text)
+    assert "nineteen ninety-nine" in result.lower()
+    assert "one million" in result.lower()

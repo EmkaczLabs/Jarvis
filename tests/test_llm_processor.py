@@ -175,3 +175,14 @@ def test_does_not_merge_common_small_words():
     proc._process_sentence_for_tts(["can", "you"])
     sent = proc.tts_input_queue.get_nowait()
     assert sent == "can you"
+
+
+def test_inserts_period_before_sentence_starter():
+    proc = _make_processor()
+    sentence = (
+        "As of twenty twenty-three approximately thirty-eight million people live in Poland "
+        "Please check the latest data for accuracy"
+    )
+    proc._process_sentence_for_tts([sentence])
+    sent = proc.tts_input_queue.get_nowait()
+    assert "Poland. Please" in sent
