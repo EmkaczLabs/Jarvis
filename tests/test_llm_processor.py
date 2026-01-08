@@ -1,7 +1,7 @@
 import queue
 import threading
 
-from glados.core.llm_processor import LanguageModelProcessor
+from jarvis.core.llm_processor import LanguageModelProcessor
 
 
 def _make_processor():

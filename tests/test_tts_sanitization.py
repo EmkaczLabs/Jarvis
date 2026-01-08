@@ -2,7 +2,7 @@ import numpy as np
 import queue
 import threading
 
-from glados.core.tts_synthesizer import TextToSpeechSynthesizer
+from jarvis.core.tts_synthesizer import TextToSpeechSynthesizer
 
 
 class FakeTTSModel:

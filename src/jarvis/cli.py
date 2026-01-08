@@ -12,7 +12,7 @@ import sys
 
 from rich import print as rprint
 
-from glados.cli import download_models as _download_models, models_valid as _models_valid, say as _say, tui as _tui
+from glados.cli import download_models as _download_models, models_valid as _models_valid, say as _say
 from jarvis.core.engine import Jarvis, JarvisConfig
 
 # Use a Jarvis-branded default config located relative to this package
@@ -33,7 +33,18 @@ def start(config_path: str | Path = DEFAULT_CONFIG) -> None:
 
 
 def tui(config_path: str | Path = DEFAULT_CONFIG) -> None:
-    return _tui(config_path)
+    """
+    Start the Jarvis TUI application.
+
+    This function instantiates and runs the JarvisUI application class.
+    """
+    try:
+        from jarvis.tui import JarvisUI
+
+        app = JarvisUI()
+        app.run()
+    except KeyboardInterrupt:
+        sys.exit()
 
 
 def main() -> int:
