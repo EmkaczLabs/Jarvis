@@ -1,6 +1,7 @@
 import queue
 import threading
 import time
+from typing import Callable
 
 from loguru import logger
 
@@ -35,6 +36,10 @@ class SpeechPlayer:
         self.processing_active_event = processing_active_event
         self.pause_time = pause_time
 
+        # Playback listeners (e.g., GUI visualizers) will be called when playback starts.
+        # Listeners must be callables that accept a single AudioMessage argument.
+        self._playback_listeners: list[Callable[[AudioMessage], None]] = []
+
     def run(self) -> None:
         """
         Starts the main loop for the AudioPlayer thread.
@@ -60,6 +65,12 @@ class SpeechPlayer:
                     continue
 
                 if audio_len and audio_msg.text:  # Ensure there's audio and text
+                    # Notify any registered listeners asynchronously so the GUI can visualize playback
+                    try:
+                        self._notify_playback_listeners(audio_msg)
+                    except Exception:
+                        logger.debug("AudioPlayer: Exception while notifying playback listeners")
+
                     self.currently_speaking_event.set()  # We are about to speak
 
                     self.audio_io.start_speaking(audio_msg.audio, self.tts_sample_rate)
@@ -105,6 +116,30 @@ class SpeechPlayer:
                 logger.exception(f"AudioPlayer: Unexpected error in run loop: {e}")
                 time.sleep(self.pause_time)  # small sleep here to prevent tight loop on persistent error
         logger.info("AudioPlayer thread finished.")
+
+    def register_playback_listener(self, listener: Callable[[AudioMessage], None]) -> None:
+        """Register a callable to be notified asynchronously when playback starts.
+
+        The listener will be invoked with the AudioMessage as its only argument.
+        Listeners are called in their own daemon thread so they must be thread-safe.
+        """
+        if listener not in self._playback_listeners:
+            self._playback_listeners.append(listener)
+
+    def unregister_playback_listener(self, listener: Callable[[AudioMessage], None]) -> None:
+        """Remove a previously-registered playback listener."""
+        try:
+            self._playback_listeners.remove(listener)
+        except ValueError:
+            pass
+
+    def _notify_playback_listeners(self, audio_msg: AudioMessage) -> None:
+        """Notify all registered listeners asynchronously."""
+        for listener in list(self._playback_listeners):
+            try:
+                threading.Thread(target=listener, args=(audio_msg,), daemon=True).start()
+            except Exception:
+                logger.exception("AudioPlayer: Failed to start listener thread")
 
     def _clear_audio_queue(self) -> None:
         """Clears the audio output queue and resets the speaking event.

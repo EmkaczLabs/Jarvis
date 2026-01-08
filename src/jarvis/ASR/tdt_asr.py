@@ -434,8 +434,6 @@ class AudioTranscriber:
                     last_emitted_token_for_decoder, state0, state1
                 )
             # else: # Blank predicted, keep decoder state and output as is
-            #     print("  --> Blank")
-            #     pass
 
             # Advance time step based on predicted duration
             current_t += predicted_skip_amount
@@ -447,27 +445,171 @@ class AudioTranscriber:
 
         return predicted_token_ids
 
-    def _post_process_text(self, token_ids: list[int]) -> str:
+    def _decode_tdt_with_timestamps(self, encoder_out: NDArray[np.float32]) -> list[dict[str, int]]:
+        """Decode encoder output producing per-token frame start/end indices.
+
+        Returns a list of dicts with keys: 'token_id', 'token', 'start_frame', 'end_frame'.
         """
-        Converts a list of token IDs into a human-readable string.
+        batch_size, _, max_encoder_t = encoder_out.shape
+        if batch_size != 1:
+            raise NotImplementedError("TDT decoding currently only supports batch size 1.")
 
-        Args:
-            token_ids: List of predicted token IDs from the decoder.
+        token_entries: list[dict[str, int | str]] = []
+        last_emitted_token_for_decoder = self.blank_id  # Start with blank for decoder init
+        state0, state1 = self.model.get_decoder_initial_state(batch_size=1)
 
-        Returns:
-            The final transcribed text.
+        # Initial decoder run with blank token
+        decoder_out, next_state0, next_state1 = self.model.run_decoder(last_emitted_token_for_decoder, state0, state1)
+
+        current_t = 0
+        loop_start_time = time.time()
+        max_steps = max_encoder_t * 2  # Safety break for potential infinite loops
+        steps_taken = 0
+
+        logger.info(f"Starting TDT decoding loop (with timestamps) for {max_encoder_t} encoder frames...")
+        while current_t < max_encoder_t and steps_taken < max_steps:
+            steps_taken += 1
+            encoder_out_t = encoder_out[:, :, current_t : current_t + 1]
+
+            # Run Joiner
+            joiner_logits = self.model.run_joiner(encoder_out_t, decoder_out)
+            joiner_logits = joiner_logits.squeeze()
+
+            token_logits = joiner_logits[: self.blank_id + 1]
+            duration_logits = joiner_logits[self.blank_id + 1 :]
+
+            predicted_token_idx = int(np.argmax(token_logits))
+            predicted_duration_bin_idx = int(np.argmax(duration_logits))
+            predicted_skip_amount = self.tdt_durations[predicted_duration_bin_idx]
+
+            if predicted_token_idx != self.blank_id:
+                token_char = self.idx2token.get(predicted_token_idx, "")
+                start_frame = int(current_t)
+                end_frame = int(current_t + predicted_skip_amount)
+                token_entries.append(
+                    {
+                        "token_id": predicted_token_idx,
+                        "token": token_char,
+                        "start_frame": start_frame,
+                        "end_frame": end_frame,
+                    }
+                )
+
+                last_emitted_token_for_decoder = int(predicted_token_idx)
+
+                # Update decoder state and output for the *next* step
+                state0 = next_state0
+                state1 = next_state1
+                decoder_out, next_state0, next_state1 = self.model.run_decoder(
+                    last_emitted_token_for_decoder, state0, state1
+                )
+
+            # Advance time step based on predicted duration
+            current_t += predicted_skip_amount
+
+        loop_end_time = time.time()
+        logger.info(f"TDT decoding with timestamps finished in {loop_end_time - loop_start_time:.2f}s ({steps_taken} steps).")
+        if steps_taken >= max_steps:
+            logger.warning("Warning: TDT decoding loop hit maximum step limit. Result might be truncated.")
+
+        return token_entries
+
+    def transcribe_with_word_timestamps(self, audio: NDArray[np.float32], sample_rate: int | None = None) -> list[dict[str, float]]:
+        """Transcribe audio and return word-level timings in seconds.
+
+        The method runs the encoder and decoding loop that returns tokens with frame ranges,
+        then groups SentencePiece-style tokens (leading '▁') into words and converts frame
+        indices to seconds using the mel spectrogram hop length and sample rate.
+
+        Returns a list of {'word': str, 'start': float, 'end': float}.
         """
-        if not token_ids:
-            return ""
+        if sample_rate is None:
+            sample_rate = self.melspectrogram.sample_rate
 
-        # Convert IDs to tokens
-        tokens_str_list = [self.idx2token.get(idx, "") for idx in token_ids]
+        # If incoming audio uses a different sample rate, resample using linear interpolation
+        if sample_rate != self.melspectrogram.sample_rate:
+            # Simple linear resample
+            src = np.asarray(audio, dtype=np.float32)
+            src_len = len(src)
+            if src_len == 0:
+                return []
+            target_len = int(round(src_len * (self.melspectrogram.sample_rate / float(sample_rate))))
+            if target_len <= 1:
+                return []
+            x_old = np.linspace(0, src_len - 1, src_len)
+            x_new = np.linspace(0, src_len - 1, target_len)
+            audio_resampled = np.interp(x_new, x_old, src).astype(np.float32)
+        else:
+            audio_resampled = np.asarray(audio, dtype=np.float32)
 
-        # Handle SentencePiece style joining (replace ' ' with space)
-        underline = "▁"
-        text = "".join(tokens_str_list).replace(underline, " ").strip()
+        # Preprocess and run encoder
+        features = self._process_audio(audio_resampled)
+        encoder_out = self.model.run_encoder(features)
 
-        return text
+        # Decode with timestamps (token-level)
+        token_entries = self._decode_tdt_with_timestamps(encoder_out)
+
+        # Group tokens into words using SentencePiece underline '▁' convention
+        words: list[dict[str, float | str]] = []
+        current_word_tokens: list[str] = []
+        current_start_frame: int | None = None
+        current_end_frame: int | None = None
+
+        for entry in token_entries:
+            tok = entry.get("token", "")
+            start_f = int(entry.get("start_frame", 0))
+            end_f = int(entry.get("end_frame", start_f))
+
+            # If token starts with underline, it denotes a new word
+            if tok.startswith("▁"):
+                # Flush previous word
+                if current_word_tokens:
+                    word_text = "".join(current_word_tokens).replace("▁", " ").strip()
+                    if word_text:
+                        words.append(
+                            {
+                                "word": word_text,
+                                "start_frame": float(current_start_frame),
+                                "end_frame": float(current_end_frame),
+                            }
+                        )
+                # Start new word
+                current_word_tokens = [tok]
+                current_start_frame = start_f
+                current_end_frame = end_f
+            else:
+                # Continuation of current word
+                if current_word_tokens:
+                    current_word_tokens.append(tok)
+                    current_end_frame = end_f
+                else:
+                    # No current word - start one implicitly
+                    current_word_tokens = [tok]
+                    current_start_frame = start_f
+                    current_end_frame = end_f
+
+        # Flush last word
+        if current_word_tokens:
+            word_text = "".join(current_word_tokens).replace("▁", " ").strip()
+            if word_text:
+                words.append(
+                    {
+                        "word": word_text,
+                        "start_frame": float(current_start_frame),
+                        "end_frame": float(current_end_frame),
+                    }
+                )
+
+        # Convert frames to seconds using hop_length and sample_rate
+        hop = float(self.melspectrogram.hop_length)
+        sr = float(self.melspectrogram.sample_rate)
+        result: list[dict[str, float | str]] = []
+        for w in words:
+            start_sec = (w["start_frame"] * hop) / sr
+            end_sec = (w["end_frame"] * hop) / sr
+            result.append({"word": w["word"], "start": float(start_sec), "end": float(end_sec)})
+
+        return result
 
     def transcribe(self, audio: NDArray[np.float32]) -> str:
         """
@@ -551,6 +693,23 @@ class AudioTranscriber:
             raise ValueError(f"Failed to load audio file {audio_path}: {e}") from e
 
         return self.transcribe(audio)
+
+    def _post_process_text(self, token_ids: list[int]) -> str:
+        """Converts a list of output token ids from the TDT decoder into a readable string.
+
+        Handles SentencePiece-style underline token (▁) to indicate word boundaries by
+        replacing it with a space and trimming extraneous whitespace.
+        """
+        if not token_ids:
+            return ""
+
+        tokens_str_list = [self.idx2token.get(idx, "") for idx in token_ids]
+
+        # Handle SentencePiece style joining (replace '▁' with space)
+        underline = "▁"
+        text = "".join(tokens_str_list).replace(underline, " ").strip()
+
+        return text
 
     def __del__(self) -> None:
         """Clean up internal ONNX model resources."""

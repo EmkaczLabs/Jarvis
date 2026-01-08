@@ -30,6 +30,8 @@ dev = [
     "types-PyYAML",
 ]
 api = ["litestar[standard,structlog]>=2.15.1"]
+# Optional GUI dependencies for the waveform visualizer
+gui = ["PySide6", "pyqtgraph"]
 
 [project.scripts]
 jarvis = "jarvis.cli:main"

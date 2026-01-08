@@ -13,6 +13,13 @@ from litestar.response import Stream
 
 from .log import structlog_plugin
 from .tts import write_jarvis_audio_file
+from .sessions import (
+    create_session,
+    get_session_history,
+    set_session_prompt,
+    post_session_message,
+    stream_session_message,
+)
 
 
 Voice = Literal["glados", "jarvis"]
@@ -56,6 +63,16 @@ async def create_speech(data: RequestData) -> Stream:
     )
 
 
-app = Litestar([create_speech], plugins=[structlog_plugin])
+app = Litestar(
+    [
+        create_speech,
+        create_session,
+        get_session_history,
+        set_session_prompt,
+        post_session_message,
+        stream_session_message,
+    ],
+    plugins=[structlog_plugin],
+)
 
 __all__ = ["create_speech", "app"]

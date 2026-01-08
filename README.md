@@ -87,24 +87,56 @@ An API route exists in `src/jarvis/api/app.py`:
 - POST `/v1/audio/speech` — accepts JSON `{ input, model, voice, response_format, speed }` and returns a file-like stream of generated audio.
 - A helper script `scripts/serve` starts a local server running that API (uses `litestar` under the hood).
 
-## Tests & development
-- Tests use `pytest`. Install dev extras and run:
+## Web UI & Electron (experimental)
 
-    pip install -e .[dev]
-    pytest -q
+A minimal React + Vite SPA and an Electron wrapper are included under `web/` to provide a desktop UI.
 
-- Linting / formatting: configured with `ruff` (see `pyproject.toml`).
+- Development workflow:
+  1. Start the Python API server (backend):
+     - In PowerShell: `uv run litestar --app jarvis.api.app:app run --host 127.0.0.1 --port 5050 --reload` (or use `scripts/serve`).
+  2. Start the frontend dev server:
+     - `cd web; npm install; npm run dev` (Vite dev server defaults to port 5173)
+  3. The Vite dev server proxies `/v1/*` requests to the backend so the SPA can call the API using relative paths like `/v1/session`.
 
-## Troubleshooting
-- Make sure required optional runtime packages (ONNX runtime variants) match your hardware and OS.
-- If you encounter DLL/installation issues when running ONNX models on Windows, ensure your environment has the appropriate system dependencies for your ONNX runtime distribution.
+- Electron:
+  - A minimal Electron main process file is available at `web/electron/main.js`.
+  - In dev you can run Electron against the Vite dev server (see `web/package.json` scripts). Packaging a production Electron binary requires bundling the Python runtime and the ONNX/model files for the target platform — see the "Caveats" section below.
 
-## License
-See `LICENSE.txt` in the repository for license terms.
+Notes & caveats:
+- The frontend uses the API endpoints to create sessions, stream responses via SSE, and request TTS audio which it plays in-browser. The visualizer is driven by the WebAudio API's AnalyserNode.
+- Packaging: bundling Python and ONNX runtimes for Electron is non-trivial and platform-specific. For now the Electron wrapper assumes a running backend during development.
 
-## Contributing
-Contributions are welcome: open an issue or submit a pull request with tests and a short description of the change.
+### Talking to Jarvis from the Web UI
+
+The web UI includes a "Record" button in the composer area. It supports two modes:
+
+- Browser SpeechRecognition (preferred): If your browser supports the Web Speech API (e.g., Chrome), the UI will use it to transcribe your speech locally and send the transcript to the assistant immediately.
+- Upload / Server ASR: If the browser does not support the Web Speech API, the UI records a short audio clip, converts it to WAV in-browser, uploads it to the server (`POST /v1/audio/asr`), and streams the resulting transcript to the assistant.
+
+If server-side ASR is not available (missing models or runtime issues), the ASR endpoint will return a 503 with a helpful message. In that case the browser SpeechRecognition fallback (if available) is the recommended way to try local speech input.
+
+## Optional GUI visualizer
+
+To enable the cinematic desktop visualizer install the optional GUI extras:
+
+    pip install -e .[gui]
+
+Then run:
+
+    jarvis gui
+
+Features:
+- Cinematic "string" visualizer with glowing strokes and a progress indicator (designed to feel sci‑fi/movie‑grade).
+- Immediate visual feedback (coarse RMS envelope) followed by a higher‑accuracy view once a background worker finishes.
+- Word‑level highlighting synchronized with the assistant's speech when the TDT ASR engine is available. Highlighting uses a blue accent color for readability.
+- Optional alignment path: if the configured `asr_engine` is `tdt` the GUI will attempt to compute exact word start/end times and highlight words precisely. If alignment is not available or fails, the GUI falls back to a proportional token timing heuristic.
+
+Notes & tuning:
+- The alignment step uses the TDT ASR model and can be CPU‑intensive for long utterances. The GUI performs alignment off the UI thread so visuals start immediately.
+- For the lowest possible latency / best sample‑accurate sync it is possible to drive highlights directly from the audio playback position (via the audio backend's output stream callback). This is not enabled by default, but can be added if you need sample-accurate highlighting.
+- If you want to avoid the startup announcement playing automatically, set `announcement: null` in `configs/jarvis_config.yaml`.
+- Run the GUI with the same Python environment you used to install the GUI extras; using different executables (e.g., `uv run ...`) can cause import differences. If you see Qt errors like "QWidget: Must construct a QApplication before a QWidget", ensure PySide6 is installed in the Python used to run the GUI and launch via `python -m jarvis.cli gui`.
+
+The GUI is optional — you can still use `jarvis start` (headless) or `jarvis tui` (terminal UI).
 
 ---
-
-If you'd like, I can also add a short CONTRIBUTING.md and a developer quickstart script to the repository.

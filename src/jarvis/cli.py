@@ -170,6 +170,19 @@ def tui(config_path: str | Path = DEFAULT_CONFIG) -> None:
         sys.exit()
 
 
+def gui(config_path: str | Path = DEFAULT_CONFIG) -> None:
+    try:
+        from jarvis.gui import run_gui_with_config
+    except ImportError:
+        print("Missing GUI dependencies. Install with: 'python -m pip install PySide6 pyqtgraph' or 'pip install .[gui]'")
+        return
+    except Exception as e:
+        print(f"Failed to import GUI runner: {e}")
+        raise
+
+    run_gui_with_config(str(config_path))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Jarvis Voice Assistant")
     subparsers = parser.add_subparsers(dest="command", help="Commands")
@@ -188,6 +201,15 @@ def main() -> int:
 
     # TUI command
     tui_parser = subparsers.add_parser("tui", help="Start Jarvis voice assistant with TUI")
+
+    # GUI command
+    gui_parser = subparsers.add_parser("gui", help="Start Jarvis voice assistant with GUI visualizer")
+    gui_parser.add_argument(
+        "--config",
+        type=str,
+        default=DEFAULT_CONFIG,
+        help=f"Path to configuration file (default: {DEFAULT_CONFIG})",
+    )
 
     # Say command
     say_parser = subparsers.add_parser("say", help="Make Jarvis speak text")
@@ -213,6 +235,8 @@ def main() -> int:
             start(args.config)
         elif args.command == "tui":
             tui()
+        elif args.command == "gui":
+            gui(args.config)
         else:
             # Default to start if no command specified
             start(DEFAULT_CONFIG)
