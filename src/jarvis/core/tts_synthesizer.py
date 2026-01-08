@@ -70,8 +70,15 @@ class TextToSpeechSynthesizer:
 
                     logger.info(f"LLM text: {sanitized}")
 
+                    # Debug log for detecting collapsed spacing issues
+                    logger.info(f"TTS Synthesizer: sanitized -> {repr(sanitized)}")
+
                     start_time = time.time()
                     spoken_text_variant = self.stc.text_to_spoken(sanitized)
+
+                    # Debug log for the spoken text produced by the converter
+                    logger.info(f"TTS Synthesizer: spoken_text_variant -> {repr(spoken_text_variant)}")
+
                     audio_data = self.tts_model.generate_speech_audio(spoken_text_variant)
                     processing_time = time.time() - start_time
 
@@ -102,14 +109,14 @@ class TextToSpeechSynthesizer:
         if not text:
             return None
 
-        # Remove any <think>...</think> spans (including multiline content)
-        sanitized = re.sub(r"<\s*think\b[^>]*>.*?</\s*think\s*>", "", text, flags=re.IGNORECASE | re.DOTALL)
+        # Replace any <think>...</think> spans with a space to avoid word concatenation
+        sanitized = re.sub(r"<\s*think\b[^>]*>.*?</\s*think\s*>", " ", text, flags=re.IGNORECASE | re.DOTALL)
 
-        # Remove any lingering single tags like <think> or </think>
-        sanitized = re.sub(r"<\s*/?\s*think\b[^>]*>", "", sanitized, flags=re.IGNORECASE)
+        # Replace any lingering single tags like <think> or </think> with a space
+        sanitized = re.sub(r"<\s*/?\s*think\b[^>]*>", " ", sanitized, flags=re.IGNORECASE)
 
-        # Remove any other angle-bracket tags conservatively
-        sanitized = re.sub(r"<[^>]+>", "", sanitized)
+        # Replace any other angle-bracket tags conservatively with a space
+        sanitized = re.sub(r"<[^>]+>", " ", sanitized)
 
         # Normalize whitespace and strip
         sanitized = re.sub(r"\s+", " ", sanitized).strip()

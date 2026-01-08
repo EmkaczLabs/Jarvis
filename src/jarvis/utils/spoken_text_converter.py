@@ -527,11 +527,35 @@ class SpokenTextConverter:
                 text_index = end_index
 
             # Join the output list into a single string
-            result = "".join(output)
+            # Use a single space when joining segments to preserve spacing
+            result = " ".join(output)
 
             # Post-processing: Handle specific cases like "a m" / "p m" to "am" / "pm"
             result = re.sub(r"\b(a m|p m)\b", lambda x: x.group().replace(" ", ""), result)
 
             return result
+        except Exception:
+            return text
+
+    def text_to_spoken(self, text: str) -> str:
+        """Backward-compatible alias for convert_to_spoken_text used throughout the codebase and tests."""
+        return self.convert_to_spoken_text(text)
+
+    def _convert_percentages(self, text: str) -> str:
+        """Convert percentage expressions (e.g., '50%') to spoken form (e.g., 'fifty percent').
+
+        This helper is kept for unit tests and historical callers that expect a dedicated
+        percentage conversion method.
+        """
+        try:
+            def repl(m: re.Match[str]) -> str:
+                num = m.group(1)
+                try:
+                    spoken = self._number_to_words(num)
+                except Exception:
+                    spoken = num
+                return f"{spoken} percent"
+
+            return re.sub(r"(\d+(?:\.\d+)?)\s*%", repl, text)
         except Exception:
             return text

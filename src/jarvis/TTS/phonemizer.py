@@ -329,4 +329,257 @@ class Phonemizer:
         return word
 
     def encode(self, sentence: Iterable[str]) -> list[int]:
-... (file continues)
+        """
+        Converts a sequence of symbols into a corresponding sequence of indices.
+
+        This method maps each symbol in the input sequence to its associated index using the token-to-index mapping.
+        It also adds special start and end tokens to the sequence for model compatibility.
+
+        Args:
+            sentence (Iterable[str]): A sequence of symbols (e.g., characters or subwords) to be encoded.
+
+        Returns:
+            list[int]: A list of integer indices representing the encoded symbols, with start and end tokens added.
+
+        Example:
+            # Assuming the sentence is ["Hello", "world"]
+            encoded_sequence = phonemizer.encode(["Hello", "world"])
+            # Possible output: [2, 34, 56, 1, 78, 90, 3]
+        """
+        sentence = [item for item in sentence for _ in range(self.config.CHAR_REPEATS)]
+        sentence = [s.lower() for s in sentence]
+        sequence = [self.token_to_idx[c] for c in sentence if c in self.token_to_idx]
+        return [
+            self.token_to_idx[SpecialTokens.START.value],
+            *sequence,
+            self.token_to_idx[SpecialTokens.END.value],
+        ]
+
+    def decode(self, sequence: NDArray[np.int64]) -> str:
+        """
+        Converts a sequence of token indices back to a human-readable string of symbols.
+
+        This method decodes a numpy array of integer indices into their corresponding token representations,
+        filtering out special tokens to produce a clean output string.
+
+        Args:
+            sequence (NDArray[np.int64]): A numpy array of integer indices representing encoded tokens.
+
+        Returns:
+            str: A decoded string containing only meaningful tokens, with special tokens removed.
+
+        Example:
+            # Assuming self.idx_to_token maps indices to tokens
+            decoded_text = phonemizer.decode(np.array([5, 10, 3, 1]))  # Returns a string of decoded tokens
+        """
+        decoded = []
+
+        for t in sequence:
+            idx = t.item()
+            token = self.idx_to_token[idx]
+            decoded.append(token)
+
+        result = "".join(d for d in decoded if d not in self.special_tokens)
+        return result
+
+    @staticmethod
+    def pad_sequence_fixed(v: list[list[int]], target_length: int) -> NDArray[np.int64]:
+        """
+        Pad or truncate a list of integer sequences to a fixed length.
+
+        This method ensures all input sequences have a uniform length by either:
+        - Truncating sequences longer than the target length
+        - Padding sequences shorter than the target length with zeros
+
+        Parameters:
+            v (list[list[int]]): A list of integer sequences to be padded/truncated
+            target_length (int): The desired uniform length for all sequences
+
+        Returns:
+            NDArray[np.int64]: A 2D numpy array with sequences of uniform length,
+            where each row represents a padded/truncated sequence
+        """
+
+        result: NDArray[np.int64] = np.zeros((len(v), target_length), dtype=np.int64)
+
+        for i, seq in enumerate(v):
+            length = min(len(seq), target_length)  # Handle both shorter and longer sequences
+            result[i, :length] = seq[:length]  # Copy either the full sequence or its truncated version
+
+        return result
+
+    def _get_dict_entry(self, word: str, punc_set: set[str]) -> str | None:
+        """
+        Retrieves the phoneme entry for a given word from the phoneme dictionary.
+
+        This method handles different word variations by checking the dictionary with original, lowercase, and
+        title-cased versions of the word. It also handles punctuation and empty strings as special cases.
+
+        Args:
+            word (str): The word to look up in the phoneme dictionary.
+            punc_set (set[str]): A set of punctuation characters.
+
+        Returns:
+            str | None: The phoneme entry for the word if found, the word itself if it's a punctuation or
+            empty string, or None if no entry exists.
+        """
+        if word in punc_set or len(word) == 0:
+            return word
+        if word in self.phoneme_dict:
+            return self.phoneme_dict[word]
+
+        elif word.lower() in self.phoneme_dict:
+            return self.phoneme_dict[word.lower()]
+
+        elif word.title() in self.phoneme_dict:
+            return self.phoneme_dict[word.title()]
+        else:
+            return None
+
+    @staticmethod
+    def _get_phonemes(
+        word: str,
+        word_phonemes: dict[str, str | None],
+        word_splits: dict[str, list[str]],
+    ) -> str:
+        """
+        Get the phonemes for a given word, handling dictionary lookup and subword processing.
+
+        Parameters:
+            word (str): The word to retrieve phonemes for.
+            word_phonemes (dict[str, str | None]): A dictionary mapping words to their phoneme representations.
+            word_splits (dict[str, list[str]]): A dictionary mapping words to their subword splits.
+
+        Returns:
+            str: The phoneme representation of the word. If the word is not directly in the dictionary,
+                 it attempts to construct phonemes from its subwords, filtering out any None values.
+
+        Raises:
+            KeyError: If the word is not found in either the word_phonemes or word_splits dictionaries.
+        """
+        phons = word_phonemes[word]
+        if phons is None:
+            subwords = word_splits[word]
+            subphons_converted = [word_phonemes[w] for w in subwords]
+            phons = "".join([subphon for subphon in subphons_converted if subphon is not None])
+        return phons
+
+    def _clean_and_split_texts(
+        self, texts: list[str], punc_set: set[str], punc_pattern: re.Pattern[str]
+    ) -> tuple[list[list[str]], set[str]]:
+        """
+        Clean and split input texts into words while preserving specified punctuation.
+
+        This method performs text preprocessing by removing non-alphanumeric characters (except specified punctuation),
+        splitting the text into words, and collecting unique cleaned words.
+
+        Parameters:
+            texts (list[str]): List of input text strings to be cleaned and split.
+            punc_set (set[str]): Set of punctuation characters to preserve during cleaning.
+            punc_pattern (re.Pattern[str]): Regular expression pattern for splitting text.
+
+        Returns:
+            tuple[list[list[str]], set[str]]: A tuple containing:
+                - A list of lists, where each inner list represents words from a corresponding input text
+                - A set of unique cleaned words across all input texts
+        """
+        split_text, cleaned_words = [], set[str]()
+        for text in texts:
+            cleaned_text = "".join(t for t in text if t.isalnum() or t in punc_set)
+            split = [s for s in re.split(punc_pattern, cleaned_text) if len(s) > 0]
+            split_text.append(split)
+            cleaned_words.update(split)
+        return split_text, cleaned_words
+
+    def convert_to_phonemes(self, texts: list[str], lang: str = "en_us") -> list[str]:
+        """
+        Converts a list of texts to phonemes using a phonemizer.
+
+        This method processes input texts through several stages:
+        1. Preprocess and clean input texts
+        2. Collect phonemes from an existing dictionary
+        3. Split words that are not in the dictionary
+        4. Predict phonemes for missing words using an ONNX model
+        5. Reconstruct phonemes for each input text
+
+        Parameters:
+            texts (list[str]): A list of text strings to convert to phonemes.
+            lang (str, optional): Language of the texts. Defaults to "en_us".
+
+        Returns:
+            list[str]: A list of phoneme representations corresponding to the input texts.
+
+        Notes:
+            - Handles punctuation and special characters
+            - Supports acronym expansion
+            - Uses a pre-trained ONNX model for phoneme prediction
+            - Supports multiple input texts simultaneously
+
+        Example:
+            phonemizer = Phonemizer()
+            texts = ["Hello world", "OpenAI"]
+            phonemes = phonemizer.convert_to_phonemes(texts)
+            # Possible output: ["HH AH0 L OW1 W ER0 L D", "OW1 P AH0 N EY1"]
+        """
+        split_text: list[list[str]] = []
+        cleaned_words = set[str]()
+
+        punc_set = Punctuation.get_punc_set()
+        punc_pattern = Punctuation.get_punc_pattern()
+
+        # Step 1: Preprocess texts
+        split_text, cleaned_words = self._clean_and_split_texts(texts, punc_set, punc_pattern)
+
+        # Step 2: Collect dictionary phonemes for words and hyphenated words
+        for punct in punc_set:
+            self.phoneme_dict[punct] = punct
+        word_phonemes = {word: self.phoneme_dict.get(word.lower()) for word in cleaned_words}
+
+        # Step 3: If word is not in dictionary, split it into subwords
+        words_to_split = [w for w in cleaned_words if word_phonemes[w] is None]
+
+        word_splits = {
+            key: re.split(
+                r"([-])",
+                self._expand_acronym(word) if self.config.EXPAND_ACRONYMS else word,
+            )
+            for key, word in zip(words_to_split, words_to_split, strict=False)
+        }
+
+        subwords = {w for values in word_splits.values() for w in values if w not in word_phonemes}
+
+        for subword in subwords:
+            word_phonemes[subword] = self._get_dict_entry(word=subword, punc_set=punc_set)
+
+        # Step 4: Predict all subwords that are missing in the phoneme dict
+        words_to_predict = [
+            word for word, phons in word_phonemes.items() if phons is None and len(word_splits.get(word, [])) <= 1
+        ]
+
+        if words_to_predict:
+            input_batch = [self.encode(word) for word in words_to_predict]
+            input_batch_padded: NDArray[np.int64] = self.pad_sequence_fixed(input_batch, self.config.MODEL_INPUT_LENGTH)
+
+            ort_inputs = {self.ort_session.get_inputs()[0].name: input_batch_padded}
+            ort_outs = self.ort_session.run(None, ort_inputs)
+
+            ids = self._process_model_output(ort_outs)
+
+            # Step 5: Add predictions to the dictionary
+            for id, word in zip(ids, words_to_predict, strict=False):
+                word_phonemes[word] = self.decode(id)
+
+        # Step 6: Get phonemes for each word in the text
+        phoneme_lists = []
+        for text in split_text:
+            text_phons = [
+                self._get_phonemes(word=word, word_phonemes=word_phonemes, word_splits=word_splits) for word in text
+            ]
+            phoneme_lists.append(text_phons)
+
+        return ["".join(phoneme_list) for phoneme_list in phoneme_lists]
+
+    def __del__(self) -> None:
+        """Clean up ONNX session to prevent context leaks."""
+        if hasattr(self, "ort_sess"):
+            del self.ort_sess

@@ -118,23 +118,33 @@ class LanguageModelProcessor:
         Args:
             current_sentence_parts (list[str]): List of sentence parts to be processed.
         """
+        if not current_sentence_parts:
+            return
+
+        # Join chunks exactly as received (original Glados behavior). We perform a
+        # conservative cleanup afterwards (remove emphasis/parentheses, replace tags
+        # with spaces, normalize whitespace). Preserving chunk edges as much as
+        # possible avoids accidental removal/concatenation of needed spaces.
         sentence = "".join(current_sentence_parts)
 
         # Remove *emphasis* and parenthetical content
         sentence = re.sub(r"\*.*?\*|\(.*?\)", "", sentence)
 
-        # Remove any residual internal tags like <think> or other angle-bracket markup
-        sentence = re.sub(r"<\s*/?\s*think\b[^>]*>", "", sentence, flags=re.IGNORECASE)
-        # Remove any remaining angle-bracket tags conservatively
-        sentence = re.sub(r"<[^>]+>", "", sentence)
+        # Replace internal thinking tags and any other angle bracket tags with a space
+        sentence = re.sub(r"<\s*think\b[^>]*>.*?</\s*think\s*>", " ", sentence, flags=re.IGNORECASE | re.DOTALL)
+        sentence = re.sub(r"<\s*/?\s*think\b[^>]*>", " ", sentence, flags=re.IGNORECASE)
+        sentence = re.sub(r"<[^>]+>", " ", sentence)
 
-        # Normalize whitespace and punctuation
-        sentence = sentence.replace("\n\n", ". ").replace("\n", ". ")
-        sentence = re.sub(r"\s+", " ", sentence)
-        sentence = sentence.strip()
+        # Normalize newlines and punctuation similar to original implementation
+        sentence = sentence.replace("\n\n", ". ").replace("\n", ". ").replace("  ", " ").replace(":", " ")
 
-        # Strip any leading non-word characters that may have been left behind after tag removal
+        # Collapse whitespace to single spaces and trim
+        sentence = re.sub(r"\s+", " ", sentence).strip()
+
+        # Strip leading punctuation left after tag removal
         sentence = re.sub(r"^[^\w]+", "", sentence, flags=re.UNICODE)
+
+        logger.debug(f"LLM Processor: Cleaned sentence to send to TTS: '{sentence}'")
 
         if sentence and sentence != ".":  # Avoid sending just a period or empty content
             logger.info(f"LLM Processor: Sending to TTS queue: '{sentence}'")
@@ -153,35 +163,34 @@ class LanguageModelProcessor:
             m_close = re.search(r"</\s*think\s*>", content, flags=re.IGNORECASE)
             if not m_close:
                 return None
-            # Trim everything up to and including the closing tag
-            content = content[m_close.end():]
+            # Trim everything up to and including the closing tag and insert a space
+            # to avoid merging words from the boundary
+            content = " " + content[m_close.end():]
             self._suppress_think = False
 
-        # Remove any inline <think>...</think> spans first
-        content = re.sub(r"<\s*think\b[^>]*>.*?</\s*think\s*>", "", content, flags=re.IGNORECASE | re.DOTALL)
+        # Replace any inline <think>...</think> spans with a space
+        content = re.sub(r"<\s*think\b[^>]*>.*?</\s*think\s*>", " ", content, flags=re.IGNORECASE | re.DOTALL)
 
-        # If an opening tag remains with no closing tag in this chunk, drop from the tag onward
+        # If an opening tag remains with no closing tag in this chunk, keep preceding
+        # text and mark that we're suppressing until a closing tag arrives. Add a
+        # trailing space to avoid concatenation with next chunk.
         m_open = re.search(r"<\s*think\b[^>]*>", content, flags=re.IGNORECASE)
         if m_open:
-            # Keep the part before the opening tag and mark that we're suppressing until a closing tag arrives
-            content = content[: m_open.start()]
+            content = content[: m_open.start()] + " "
             self._suppress_think = True
 
-        # Remove any stray tags like </think> or similar remnants
-        content = re.sub(r"<\s*/?\s*think\b[^>]*>", "", content, flags=re.IGNORECASE)
+        # Replace any stray tags like </think> or similar remnants with a space
+        content = re.sub(r"<\s*/?\s*think\b[^>]*>", " ", content, flags=re.IGNORECASE)
 
-        # Remove any other remaining angle-bracket-like tags conservatively
-        content = re.sub(r"<[^>]+>", "", content)
+        # Replace any other remaining angle-bracket-like tags conservatively with a space
+        content = re.sub(r"<[^>]+>", " ", content)
 
-        # Collapse whitespace
-        content = re.sub(r"\s+", " ", content).strip()
+        # Collapse whitespace but DO NOT strip leading/trailing spaces so chunk edge
+        # spacing is preserved for correct assembly in the sentence join step.
+        content = re.sub(r"[ \t\r\n]+", " ", content)
 
-        # If the chunk is now empty or only punctuation, ignore it (we don't want to speak stray punctuation)
-        if not content or re.fullmatch(r"[\W_]+", content):
-            return None
-
-        # Remove any leading non-word characters (punctuation, stray symbols) to avoid spoken artifacts
-        content = re.sub(r"^[^\w]+", "", content, flags=re.UNICODE)
+        # Remove any leading punctuation (but preserve leading spaces and apostrophes)
+        content = re.sub(r"^[^\w'\s]+", "", content, flags=re.UNICODE)
 
         return content
 

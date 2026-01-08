@@ -102,3 +102,76 @@ def test_closing_think_with_leading_punctuation():
     # Leading punctuation should be stripped
     assert not out.startswith(".")
     assert out.strip().lower().startswith("hello")
+
+
+def test_preserves_spaces_between_chunks():
+    proc = _make_processor()
+    # Simulate chunks that would naturally arrive split from the LLM stream
+    proc._process_sentence_for_tts(["Hello", "How can I assist you today?"])
+    sent = proc.tts_input_queue.get_nowait()
+    assert sent == "Hello How can I assist you today?"
+
+
+def test_think_removal_preserves_spaces_across_tags():
+    proc = _make_processor()
+
+    # Simulate an inline think span that appears between words
+    chunk = {"message": {"content": "Hello<think>internal</think> How can I assist you today."}}
+    out = proc._process_chunk(chunk)
+    assert out is not None
+    assert "think" not in out.lower()
+    # The space should be preserved where the tag was removed
+    assert "hello how can" in out.lower()
+
+
+def test_think_removal_across_chunk_boundaries_preserves_spaces():
+    proc = _make_processor()
+    # Simulate chunked stream where opening/closing tags split across chunks
+    chunk1 = {"message": {"content": "Hello<think>internal continues"}}
+    chunk2 = {"message": {"content": " and ends</think> How are you?"}}
+
+    out1 = proc._process_chunk(chunk1)
+    out2 = proc._process_chunk(chunk2)
+
+    assert out1 is None
+    assert out2 is not None
+    assert "hello" in out2.lower()
+    assert "how are you" in out2.lower()
+
+
+def test_merges_mid_word_chunks():
+    proc = _make_processor()
+    # Simulate a mid-word split across chunks
+    proc._process_sentence_for_tts(["clar", "ify"])
+    sent = proc.tts_input_queue.get_nowait()
+    assert sent == "clarify"
+
+
+def test_preserves_space_when_present_between_chunks():
+    proc = _make_processor()
+    # Simulate a normal word boundary where the first chunk contained trailing whitespace
+    proc._process_sentence_for_tts(["hello ", "world"])
+    sent = proc.tts_input_queue.get_nowait()
+    assert sent == "hello world"
+
+
+def test_single_letter_capital_prefix_merges():
+    proc = _make_processor()
+    proc._process_sentence_for_tts(["N", "iger", "so"])
+    sent = proc.tts_input_queue.get_nowait()
+    assert sent.startswith("Niger")
+    assert "Niger so" in sent
+
+
+def test_does_not_merge_I_or_A_prefix():
+    proc = _make_processor()
+    proc._process_sentence_for_tts(["I", "am"])
+    sent = proc.tts_input_queue.get_nowait()
+    assert sent == "I am"
+
+
+def test_does_not_merge_common_small_words():
+    proc = _make_processor()
+    proc._process_sentence_for_tts(["can", "you"])
+    sent = proc.tts_input_queue.get_nowait()
+    assert sent == "can you"

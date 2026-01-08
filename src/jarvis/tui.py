@@ -405,3 +405,38 @@ class GladosUI(App[None]):
         self.start_instantiation()
 
         logger.add(print, format=fmt, level="SUCCESS")  # Changed to DEBUG for more verbose logging during dev
+
+    def instantiate_glados(self) -> None:
+        """
+        Instantiate the Jarvis engine.
+
+        This function creates an instance of the Jarvis engine, which is responsible for
+        managing the system's operations and interactions. The instance can be used
+        to control various aspects of the engine, including starting and stopping
+        its event loop.
+
+        Returns:
+            None
+        """
+
+        config_path = Path("configs/jarvis_config.yaml")
+        if not config_path.exists():
+            logger.error(f"Jarvis config file not found: {config_path}")
+
+        glados_config = GladosConfig.from_yaml(str(config_path))
+        self.glados_engine_instance = Glados.from_config(glados_config)
+
+    def start_instantiation(self) -> None:
+        """Starts the worker to instantiate the slow class."""
+        if self.instantiation_worker is not None:
+            self.notify("Instantiation already in progress!", severity="warning")
+            return
+
+        self.instantiation_worker = self.run_worker(
+            self.instantiate_glados,  # The callable function
+            thread=True,  # Run in a thread (default)
+        )
+
+
+# Backwards-compatible alias expected by the CLI
+JarvisUI = GladosUI
